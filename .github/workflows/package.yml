@@ -1,0 +1,65 @@
+name: Package Build Output
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-package:
+    name: Build & Package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build and Publish
+        shell: pwsh
+        run: |
+          # Add MSBuild to PATH
+          $msbuildPath = Split-Path (& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\Current\Bin\amd64\MSBuild.exe | Select-Object -First 1) -Parent
+          $env:PATH = $msbuildPath + ';' + $env:PATH
+          
+          # Run build script
+          .\build.ps1
+
+      - name: Prepare Staging Directory
+        shell: pwsh
+        run: |
+          Write-Host "Creating package layout..."
+          New-Item -ItemType Directory -Force -Path temp_package/net48
+          New-Item -ItemType Directory -Force -Path temp_package/net10.0
+          
+          if (Test-Path "Release/net48") {
+              Copy-Item -Path "Release/net48/*" -Destination "temp_package/net48" -Recurse
+              Write-Host "Copied net48 build output."
+          } else {
+              Write-Warning "Release/net48 not found!"
+          }
+          
+          if (Test-Path "publish-net10.0") {
+              Copy-Item -Path "publish-net10.0/*" -Destination "temp_package/net10.0" -Recurse
+              Write-Host "Copied net10.0 build output."
+          } else {
+              Write-Warning "publish-net10.0 not found!"
+          }
+          
+          $nupkgs = Get-ChildItem -Path "Release" -Filter "*.nupkg" -ErrorAction SilentlyContinue
+          if ($nupkgs) {
+              New-Item -ItemType Directory -Force -Path temp_package/packages
+              Copy-Item -Path "Release/*.nupkg" -Destination "temp_package/packages"
+              Write-Host "Copied NuGet packages."
+          }
+
+      - name: Compress Build Output
+        shell: pwsh
+        run: |
+          Write-Host "Compressing build output into ZIP..."
+          Compress-Archive -Path temp_package/* -DestinationPath de4dot-build.zip -Force
+          Write-Host "Successfully created de4dot-build.zip"
+
+      - name: Upload Zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: de4dot-build-artifact
+          path: de4dot-build.zip
+          retention-days: 90
